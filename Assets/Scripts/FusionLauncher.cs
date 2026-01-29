@@ -34,6 +34,9 @@ namespace Com.MyCompany.MyGame
         {
             controlPanel.SetActive(false);
             progressLabel.SetActive(true);
+            
+            // Keep this object alive when the scene reloads
+            DontDestroyOnLoad(gameObject);
 
             _runner = gameObject.AddComponent<NetworkRunner>();
             _runner.ProvideInput = true;
@@ -68,6 +71,16 @@ namespace Com.MyCompany.MyGame
         {
             var data = new NetworkInputData();
 
+            // Check Chat State - Stop movement if chat is open
+            var chatMgr = FindFirstObjectByType<ChatManager>();
+            if (chatMgr != null && chatMgr.IsChatOpen)
+            {
+                // Send zero input
+                data.direction = Vector2.zero;
+                input.Set(data);
+                return;
+            }
+
             float x = 0;
             float y = 0;
 
@@ -77,11 +90,21 @@ namespace Com.MyCompany.MyGame
                 if (Keyboard.current.sKey.isPressed) y -= 1;
                 if (Keyboard.current.aKey.isPressed) x -= 1;
                 if (Keyboard.current.dKey.isPressed) x += 1;
+                
+                data.isInteractPressed = Keyboard.current.fKey.isPressed;
             }
 
-            data.direction = new Vector2(x, y);
 
-            if (x != 0 || y != 0) Debug.Log($"Input Detected (New System): {x}, {y}");
+
+            data.direction = new Vector2(x, y);
+            
+            // Capture Camera Rotation for Freelook Movement
+            if (Camera.main != null)
+            {
+                data.lookYaw = Camera.main.transform.eulerAngles.y;
+            }
+
+            if (x != 0 || y != 0 || data.isInteractPressed) Debug.Log($"Input: Move {x},{y} Interact: {data.isInteractPressed}");
 
             input.Set(data);
         }
