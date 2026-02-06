@@ -8,5 +8,13 @@ namespace Com.MyCompany.MyGame
         public Vector2 direction;
         public NetworkBool isInteractPressed;
         public float lookYaw;
+        public NetworkButtons buttons;
+    }
+
+    public enum InputButton
+    {
+        Jump,
+        Crouch,
+        Sprint
     }
 }

@@ -1193,7 +1193,7 @@ Camera:
     height: 1
   near clip plane: 0.3
   far clip plane: 1000
-  field of view: 68.20774
+  field of view: 60.000004
   orthographic: 0
   orthographic size: 5
   m_Depth: -1
@@ -1219,8 +1219,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.18301274, y: 0.6830127, z: -0.18301274, w: 0.6830127}
-  m_LocalPosition: {x: -35.4, y: 32.7, z: -0.3}
+  m_LocalRotation: {x: 0.2534013, y: -3.7196904e-10, z: 9.743769e-11, w: 0.9673613}
+  m_LocalPosition: {x: 41.95787, y: 2.25, z: 45.63813}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1490,6 +1490,54 @@ MonoBehaviour:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.RectMask2D
   m_Padding: {x: -8, y: -5, z: -8, w: -5}
   m_Softness: {x: 0, y: 0}
+--- !u!1 &358340117
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 358340119}
+  - component: {fileID: 358340118}
+  m_Layer: 0
+  m_Name: NetworkManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &358340118
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 358340117}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13a7320af2a217f43ad592a0f8fc2889, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Com.MyCompany.MyGame.NetworkManager
+  playerPrefab:
+    RawGuidValue: 8de6ab99d87cde343a33cd34de68e3ad
+  teamASpawnPoint: {fileID: 1432299041}
+  teamBSpawnPoint: {fileID: 1301510729}
+--- !u!4 &358340119
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 358340117}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.3358, y: -0.00001, z: -2.05288}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &372994821
 GameObject:
   m_ObjectHideFlags: 0
@@ -1539,10 +1587,6 @@ MonoBehaviour:
   startButton: {fileID: 71466224}
   controlPanel: {fileID: 165947035}
   progressLabel: {fileID: 349496533}
-  playerPrefab:
-    RawGuidValue: 26a40ec2818d20847bb115f1cfd2a179
-  teamASpawnPoint: {fileID: 1432299041}
-  teamBSpawnPoint: {fileID: 1301510729}
 --- !u!1 &390185555
 GameObject:
   m_ObjectHideFlags: 0
@@ -4815,9 +4859,9 @@ GameObject:
   - component: {fileID: 1989532947}
   - component: {fileID: 1989532946}
   - component: {fileID: 1989532945}
-  m_Layer: 0
+  m_Layer: 3
   m_Name: Ground
-  m_TagString: Untagged
+  m_TagString: Ground
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -4922,6 +4966,7 @@ SceneRoots:
   - {fileID: 330585546}
   - {fileID: 410087041}
   - {fileID: 832575519}
+  - {fileID: 358340119}
   - {fileID: 372994822}
   - {fileID: 1989532948}
   - {fileID: 1260690424}

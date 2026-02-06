@@ -6,11 +6,13 @@ using Unity.Cinemachine;
 
 namespace Com.MyCompany.MyGame
 {
+    [RequireComponent(typeof(NetworkTransform), typeof(NetworkObject))]
     public class PlayerController : NetworkBehaviour
     {
         [Header("UI References")]
         [SerializeField] private Renderer playerRenderer;
         [SerializeField] private GameObject deathVfxPrefab;
+        [SerializeField] private Animator animator; // Added for character animations
 
         [Header("Camera")]
         [SerializeField] private Camera fpsCamera;
@@ -41,7 +43,27 @@ namespace Com.MyCompany.MyGame
         [Networked]
         private TickTimer PoisonTimer { get; set; }
 
+        [Networked] 
+        public NetworkButtons ButtonsPrevious { get; set; }
+
         public const int MaxHealth = 100;
+        
+        [Header("Movement Logic")]
+        [SerializeField] private float jumpForce = 2.0f; // This acts as Jump Height in the formula
+        [SerializeField] private float gravityValue = -20.0f; // Stronger gravity for snappier jumps
+        
+        private CharacterController _cc;
+        [Networked] 
+        private float VerticalVelocity { get; set; } // FIX: Must be Networked for prediction/rollback!
+
+        // ANIMATION SYNC (Networked Properties for Proxies)
+        [Networked] private float NetAnimSpeed { get; set; }
+        [Networked] private NetworkBool NetIsGrounded { get; set; }
+        [Networked] private NetworkBool NetIsCrouching { get; set; }
+        [Networked] private NetworkBool NetIsJumping { get; set; }
+        
+        // private float _verticalVelocity; // Old local variable causing desync
+        // private bool _isGrounded; // Removed, using NetIsGrounded now
 
         private TMP_Text _spawnedNameText;
         private HPBarController _hpBar;
@@ -91,7 +113,49 @@ namespace Com.MyCompany.MyGame
             if (CurrentHealth > 0 && GetInput(out NetworkInputData data))
             {
                 data.direction.Normalize();
+
+                if (_cc == null) _cc = GetComponent<CharacterController>();
+
+                if (_cc == null) _cc = GetComponent<CharacterController>();
+
+                // --- ROBUST GROUND CHECK ---
+                // CharacterController.isGrounded is often flaky (flickers true/false).
+                // Use a dedicated SphereCheck at the feet.
+                float groundRadius = 0.28f;
+                Vector3 groundCheckPos = transform.position + Vector3.down * 0.1f; // Slightly below feet
+                // Layer mask: Default (1) + Ground layers. 
+                // Adjust mask if you have specific layers!
+                NetIsGrounded = Physics.CheckSphere(groundCheckPos, groundRadius, LayerMask.GetMask("Default", "Ground"), QueryTriggerInteraction.Ignore);
                 
+                // Fallback: If no dedicated layer, try everything except Player
+                if (LayerMask.GetMask("Default", "Ground") == 0)
+                {
+                     NetIsGrounded = Physics.CheckSphere(groundCheckPos, groundRadius, ~LayerMask.GetMask("Player"), QueryTriggerInteraction.Ignore);
+                }
+
+                // Reset vertical velocity if grounded
+                if (NetIsGrounded && VerticalVelocity < 0)
+                {
+                    VerticalVelocity = -2f; // Small constant downward force to snap to ground
+                }
+
+                // --- JUMP CHECK ---
+                // Check if Jump button pressed this frame
+                if (data.buttons.WasPressed(ButtonsPrevious, InputButton.Jump))
+                {
+                    if (NetIsGrounded)
+                    {
+                        VerticalVelocity = Mathf.Sqrt(jumpForce * -2f * gravityValue);
+                        // Trigger logic: handled by state change usually, or one-shot? 
+                        // For now, let's rely on NetIsJumping state in air
+                    }
+                }
+                
+                // --- CROUCH CHECK ---
+                bool isCrouching = data.buttons.IsSet(InputButton.Crouch);
+                bool isSprinting = data.buttons.IsSet(InputButton.Sprint);
+                
+                // --- MOVEMENT ---
                 // Calculate Rotation based on Camera Look Yaw
                 Quaternion cameraRotation = Quaternion.Euler(0, data.lookYaw, 0);
                 
@@ -99,40 +163,67 @@ namespace Com.MyCompany.MyGame
                 Vector3 inputDir = new Vector3(data.direction.x, 0, data.direction.y);
                 Vector3 moveDir = cameraRotation * inputDir;
                 
-                // Apply Movement Speed
-                Vector3 moveDelta = moveDir * moveSpeed * Runner.DeltaTime;
-
-                // --- GRAVITY & GROUND CHECK ---
-                // Simple Gravity: If we are above ground (Y > 0), pull down.
-                // Assuming pivot is at center (Y=1) or bottom (Y=0). 
-                // Let's assume standard capsule: Height 2, Center Y=1. 
-                // So "Ground" is when position.y = 1 (if pivot center) or 0 (if pivot bottom).
-                
-                // Usually Unity primitives have pivot at Center. So Y=1 is "On Ground".
-                // But the user screenshot shows them floating high.
-                // We will use a Raycast to be sure, or just add gravity until we hit something.
-                
-                moveDelta.y += -9.81f * Runner.DeltaTime; 
-                
-                // Apply Move
-                transform.position += moveDelta;
-
-                // Simple Floor Clamp (Hardcoded for flat prototype floor at Y=0)
-                // Adjust this threshold based on your actual object pivot
-                // If using a Capsule(Height 2), Center is 1 unit up.
-                float groundY = 1.0f; 
-                if (transform.position.y < groundY)
+                // Apply Speed Modifiers
+                float currentSpeed = moveSpeed;
+                if (isCrouching) 
                 {
-                    transform.position = new Vector3(transform.position.x, groundY, transform.position.z);
+                    currentSpeed *= 0.5f; // Half speed when crouching
+                }
+                else if (isSprinting && NetIsGrounded) 
+                {
+                    currentSpeed *= 1.5f; // 1.5x speed when sprinting (and not crouching)
                 }
                 
+                // Apply Movement Speed
+                Vector3 moveDelta = moveDir * currentSpeed * Runner.DeltaTime;
+
+                // Apply Gravity
+                VerticalVelocity += gravityValue * Runner.DeltaTime;
+                moveDelta.y += VerticalVelocity * Runner.DeltaTime;
+                
+                // Move Player via CharacterController
+                if (_cc != null)
+                {
+                    // Debug Trace for "Frozen" issue
+                    Vector3 posBefore = transform.position;
+                    _cc.Move(moveDelta);
+                    if (data.direction != Vector2.zero) Debug.Log($"[MOVELOG] In: {moveDelta} | PosDelta: {transform.position - posBefore}");
+                }
+                else
+                {
+                    // Fallback to Transform (should not happen if RequireComponent is set)
+                    transform.Translate(moveDelta, Space.World);
+                }
+
                 // Rotate Player to Face Movement
                 if (moveDir.sqrMagnitude > 0.01f)
                 {
                     transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(moveDir), Runner.DeltaTime * 10f); // Smooth rotation
                 }
                 
-                if (data.direction != Vector2.zero) Debug.Log("Moving Player based on input!");
+                // --- SYNC ANIMATION STATE ---
+                // We update the Networked Properties here. The Render() method will apply them to the Animator.
+                
+                // Speed (Horizontal magnitude)
+                float inputMag = new Vector3(data.direction.x, 0, data.direction.y).magnitude;
+                
+                // Use ACTUAL calculated physics speed (e.g. 5.0, 7.5, 2.5) instead of normalized 0-1
+                float speedToPass = (inputMag > 0.01f) ? currentSpeed : 0f;
+
+                NetAnimSpeed = speedToPass;
+                NetIsCrouching = isCrouching;
+                NetIsJumping = !NetIsGrounded && VerticalVelocity > 0;
+                
+                /* Animator update moved to Render() */
+                
+                // Store buttons for "WasPressed" check next frame
+                ButtonsPrevious = data.buttons;
+                
+                // Debug log for Server Input Receipt
+                if (Runner.IsServer && data.direction != Vector2.zero) 
+                {
+                   Debug.Log($"[PlayerController] Server Received Input from {Object.InputAuthority}: {data.direction}");
+                }
             }
 
             // Poison Logic (Server Only)
@@ -246,6 +337,24 @@ namespace Com.MyCompany.MyGame
 
         public override void Render()
         {
+            // --- SYNC ANIMATION VISUALS (Runs on All Clients) ---
+            if (animator != null)
+            {
+                // We use the Networked Properties so proxies can see the animation too!
+                // Lerp speed for smoothness
+                float currentAnimSpeed = animator.GetFloat("Speed");
+                float newAnimSpeed = Mathf.Lerp(currentAnimSpeed, NetAnimSpeed, Runner.DeltaTime * 10f);
+                animator.SetFloat("Speed", newAnimSpeed);
+
+                animator.SetBool("IsGrounded", NetIsGrounded);
+                animator.SetBool("IsCrouching", NetIsCrouching);
+                
+                // For Jumping, we can use the state. 
+                // Note: Triggers are harder to sync without a ChangeDetector, 
+                // but the boolean 'IsJumping' state often handles the "falling" loop.
+                animator.SetBool("IsJumping", NetIsJumping);
+            }
+
             // Manual Change Detection to avoid Fusion versioning issues with OnChanged
             if (TeamIndex != _lastTeamIndex || PlayerName.ToString() != _lastPlayerName)
             {
@@ -378,6 +487,8 @@ namespace Com.MyCompany.MyGame
 
         public override void Spawned()
         {
+            Debug.Log($"[PlayerController] Spawned! ID: {Id} | InputAuthority: {Object.InputAuthority} | HasInputAuth: {Object.HasInputAuthority} | HasStateAuth: {Object.HasStateAuthority}");
+
             if (Object.HasStateAuthority)
             {
                 CurrentHealth = MaxHealth;
@@ -385,6 +496,36 @@ namespace Com.MyCompany.MyGame
             
             _lastVisibleHealth = CurrentHealth;
             if (playerRenderer != null) playerRenderer.enabled = true;
+
+            // Auto-find Animator if not manually assigned
+            if (animator == null) animator = GetComponent<Animator>();
+            if (animator == null) animator = GetComponentInChildren<Animator>(); // Check children too for model hierarchy
+
+            if (animator != null)
+            {
+                 // FIX: Disable Root Motion so CharacterController drives the movement!
+                 animator.applyRootMotion = false;
+                 
+                 Debug.Log($"[PlayerController] Animator Found! Listing Parameters:");
+                 foreach(var p in animator.parameters)
+                 {
+                     Debug.Log($"   - Name: '{p.name}' Type: {p.type} Default: {p.defaultFloat}");
+                 }
+            }
+            else
+            {
+                Debug.LogError("[PlayerController] CRITICAL: Animator NOT found on player prefab!");
+            }
+
+            // Setup CharacterController
+            _cc = GetComponent<CharacterController>();
+            if (_cc != null)
+            {
+                // Reset CC to ensure it accepts the Spawn position
+                _cc.enabled = false;
+                _cc.enabled = true;
+                Debug.Log($"[PlayerController] CharacterController reset. Pos: {transform.position}");
+            }
 
             // 1. Name Tag
             GameObject textObj = new GameObject("DynamicNameTag");
@@ -465,43 +606,23 @@ namespace Com.MyCompany.MyGame
             {
                 Local = this; // Set static reference
                 
-                // 1. Try to find the persistent LobbyPlayerData first (Correct approach for Lobby flow)
-                // We need to find the one that has InputAuthority (ours)
-                var allLobbyData = FindObjectsByType<LobbyPlayerData>(FindObjectsSortMode.None);
-                LobbyPlayerData myLobbyData = null;
-                foreach (var lobby in allLobbyData)
+                Local = this; // Set static reference
+                
+                // STANDALONE MODE: Initialize directly from FusionLauncher UI
+                FusionLauncher launcher = FindFirstObjectByType<FusionLauncher>();
+                if (launcher != null)
                 {
-                    if (lobby.Object != null && lobby.Object.HasInputAuthority)
-                    {
-                        myLobbyData = lobby;
-                        break;
-                    }
-                }
-
-                if (myLobbyData != null)
-                {
-                    // Found Lobby Data: The Server ALREADY used this to set our Name/Team.
-                    // We do NOT need to send an RPC to overwrite it. 
-                    // Trust the State Authority (Server).
-                    Debug.Log($"[PlayerController] Found LobbyPlayerData (Name: {myLobbyData.PlayerName}). Trusting Server Spawn logic.");
+                    Debug.Log("[PlayerController] Standalone Mode: Initializing from FusionLauncher UI.");
+                    var name = launcher.GetLocalPlayerName();
+                    // var teamIndex = launcher.GetLocalPlayerTeamIndex(); // Team is set by NetworkManager, don't override
+                    RPC_SetDetails(name, TeamIndex);
                 }
                 else
                 {
-                    // 2. Fallback: Standalone Mode (or direct scene load) logic
-                    // Only used if we started directly in SampleScene without a Lobby
-                    
-                    // We check if our TeamIndex is ALREADY set (e.g. by Editor properties?)
-                    // But usually in standalone it's 0.
-                    
-                    FusionLauncher launcher = FindFirstObjectByType<FusionLauncher>();
-                    if (launcher != null)
-                    {
-                         Debug.LogWarning("[PlayerController] No LobbyPlayerData found. Initializing from FusionLauncher UI (Standalone Mode).");
-                        var name = launcher.GetLocalPlayerName();
-                        var teamIndex = launcher.GetLocalPlayerTeamIndex();
-                        RPC_SetDetails(name, teamIndex);
-                    }
+                    Debug.LogWarning("[PlayerController] FusionLauncher not found. Using default details.");
+                    // Optional: RPC_SetDetails("Player", 0);
                 }
+
                 _hpBar = FindFirstObjectByType<HPBarController>();
                 if (_hpBar != null) _hpBar.UpdateHealth(CurrentHealth, MaxHealth);
             }
@@ -608,14 +729,35 @@ namespace Com.MyCompany.MyGame
             }
 
             // Team Visuals (Procedural Fire/Ice)
-            if (TeamIndex == 0)
+            // Team Visuals removed as we migrate to character models
+            // if (TeamIndex == 0) ... ApplyFireVisuals
+            // if (TeamIndex == 1) ... ApplyIceVisuals
+        }
+
+        private void OnGUI()
+        {
+            if (Runner == null || !Runner.IsRunning) return;
+
+            // Only show for the specific player, projected to screen
+            if (Object == null) return;
+
+            Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 2.5f);
+            if (screenPos.z < 0) return; // Behind camera
+
+            GUI.color = Color.black;
+            string debugInfo = $"ID: {Id}\nAuth: {(Object.HasInputAuthority ? "INPUT" : "")} {(Object.HasStateAuthority ? "STATE" : "")}\n" +
+                               $"Grounded: {NetIsGrounded}\n" +
+                               $"Vel-Y: {VerticalVelocity:F2}\n" +
+                               $"AnimSpeed: {NetAnimSpeed:F2}";
+            
+            // Server-Only Input Check info
+            if (Runner.IsServer)
             {
-                TeamVisualsHelper.ApplyFireVisuals(this.gameObject, playerRenderer);
+                 // We can't easily see the current frame input here since it's in FixedUpdate,
+                 // but we can show the Networked Animation Speed which REFLECTS input.
             }
-            else if (TeamIndex == 1)
-            {
-                TeamVisualsHelper.ApplyIceVisuals(this.gameObject, playerRenderer);
-            }
+
+            GUI.Label(new Rect(screenPos.x - 50, Screen.height - screenPos.y - 50, 200, 100), debugInfo);
         }
     }
 }
